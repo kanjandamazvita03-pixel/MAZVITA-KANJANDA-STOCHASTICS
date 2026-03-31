@@ -1,0 +1,398 @@
+---
+title: "HASTS416 - Stochastic Processes: Tutorial 1 Solutions in R"
+author: "Mazvita Kanjanda 
+         R229049Z,
+         HDSC"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+# Set default chunk options
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center")
+```
+
+## Setup and Package Installation
+
+```{r packages}
+library(markovchain)
+library(ggplot2)
+library(reshape2)
+```
+
+---
+
+## QUESTION A1: 5-State Markov Chain
+
+### Define the transition matrix
+
+```{r a1-setup}
+P1 <- matrix(c(
+  1.0, 0.0, 0.0, 0.0, 0.0,
+  0.5, 0.0, 0.0, 0.0, 0.5,
+  0.2, 0.0, 0.0, 0.0, 0.8,
+  0.0, 0.0, 1.0, 0.0, 0.0,
+  0.0, 0.0, 0.0, 1.0, 0.0
+), nrow = 5, byrow = TRUE)
+
+states1 <- c("S1", "S2", "S3", "S4", "S5")
+rownames(P1) <- colnames(P1) <- states1
+
+mc1 <- new("markovchain",
+           transitionMatrix = P1,
+           states           = states1,
+           name             = "A1: 5-State Markov Chain")
+```
+
+### Part (a): Diagram and State Classification
+
+```{r a1-part-a-plot}
+plot(mc1,
+     main              = "A1: 5-State Markov Chain",
+     vertex.color      = "lightblue",
+     vertex.label.cex  = 1.2,
+     edge.arrow.size   = 0.6,
+     edge.label.cex    = 0.9)
+```
+
+```{r a1-part-a-classes}
+# Communicating / recurrent / transient classes
+print(communicatingClasses(mc1))
+print(recurrentClasses(mc1))
+print(transientClasses(mc1))
+print(absorbingStates(mc1))
+
+# Period of each state
+for (s in states1) {
+  # period() works on the whole chain; evaluate per communicating class
+  sub_states <- s
+  cat(sprintf("  State %s: %s\n", s,
+      ifelse(s %in% unlist(recurrentClasses(mc1)),
+             paste("period =", period(mc1)),
+             "transient (period not defined)")))
+}
+```
+
+**Interpretation:**
+* S1 is **ABSORBING** (recurrent): P(S1 -> S1) = 1. Period = 1.
+* S2 is **TRANSIENT**: goes to S1 or S5, never returns.
+* S3 is **TRANSIENT**: goes to S1 or S5, never returns.
+* S4 -> S3 (certain), S5 -> S4 (certain), creating a cycle S3->S5->S4->S3 of length 3, but S3 can also jump to absorbing S1. Therefore S3, S4, S5 are **TRANSIENT** with potential period 3.
+* Recurrent class: {S1} (sole absorbing state).
+* Transient states: {S2, S3, S4, S5}.
+* No reflecting states.
+
+### Part (b): Three Simulated Trajectories
+
+```{r a1-part-b}
+set.seed(123)
+n_steps <- 25
+state_num <- function(s) as.integer(gsub("S", "", s))
+
+par(mfrow = c(3, 1), mar = c(4, 4, 3, 1))
+for (i in 1:3) {
+  start <- sample(states1, 1)
+  traj  <- c(start, rmarkovchain(n = n_steps, object = mc1, t0 = start))
+  plot(0:n_steps, state_num(traj),
+       type  = "b", pch = 19, col = i + 1, lwd = 1.5,
+       xlab  = "Step n", ylab = "State",
+       ylim  = c(1, 5),
+       main  = sprintf("Trajectory %d  |  Start: %s", i, start),
+       yaxt  = "n")
+  axis(2, at = 1:5, labels = states1)
+  cat(sprintf("Trajectory %d (start = %s): %s\n", i, start,
+              paste(traj, collapse = " -> ")))
+}
+par(mfrow = c(1, 1))
+```
+
+**Comment:** All three trajectories eventually get absorbed into State S1 and remain there permanently. Transient states S2-S5 are visited only a finite number of times before absorption. The absorbing nature of S1 is clearly visible as all paths end up staying at S1.
+
+### Part (c): Steady-State Probabilities
+
+```{r a1-part-c}
+ss1 <- steadyStates(mc1)
+print(round(ss1, 6))
+```
+
+**Interpretation:**
+The steady-state distribution places probability 1 on State S1 (the absorbing state) and 0 on all other states. This means that regardless of the starting state, the chain will eventually be absorbed into S1 with certainty.
+
+**Is the chain ergodic?**
+**NO.** An ergodic chain must be irreducible (all states communicate) AND aperiodic. This chain is NOT irreducible because S1 is absorbing and no other state can be reached from S1. Hence it is not ergodic.
+
+### Part (d): Convergence of Unconditional Probabilities
+
+```{r a1-part-d}
+n_time   <- 30
+init_d   <- rep(1/5, 5)           # uniform starting distribution
+prob_mat <- matrix(0, n_time + 1, 5)
+prob_mat[1, ] <- init_d
+
+for (t in 1:n_time) prob_mat[t + 1, ] <- prob_mat[t, ] %*% P1
+
+# Plot using base graphics
+matplot(0:n_time, prob_mat,
+        type = "l", lty = 1, lwd = 2, col = 1:5,
+        xlab = "Time n", ylab = "Probability",
+        main = "A1: Convergence of Unconditional Probabilities to Steady State",
+        ylim = c(0, 1))
+legend("right", legend = states1, col = 1:5, lty = 1, lwd = 2, bty = "n")
+abline(h = ss1[1, ], lty = 2, col = "grey50")
+```
+
+**Comment:** Starting from a uniform distribution, the probability of being in S1 rises quickly and approaches 1 by around step 15-20. Probabilities for S2-S5 all converge to 0. Convergence is not very fast because the transient states S3->S4->S5 form a slow-draining cycle. The dashed horizontal line shows the steady-state value (1 for S1, 0 otherwise).
+
+---
+
+## QUESTION A2: 7-State Markov Chain
+
+```{r a2-setup}
+P2 <- matrix(c(
+  0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+  1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+  0.0, 0.0, 0.0, 0.4, 0.2, 0.2, 0.2,
+  0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.4,
+  0.3, 0.0, 0.0, 0.1, 0.3, 0.1, 0.2,
+  0.0, 0.0, 0.0, 0.2, 0.2, 0.3, 0.3,
+  0.0, 0.0, 0.0, 0.5, 0.2, 0.2, 0.1
+), nrow = 7, byrow = TRUE)
+
+states2 <- paste0("S", 1:7)
+rownames(P2) <- colnames(P2) <- states2
+
+mc2 <- new("markovchain",
+           transitionMatrix = P2,
+           states           = states2,
+           name             = "A2: 7-State Markov Chain")
+```
+
+### Part (a): Diagram
+
+```{r a2-part-a}
+plot(mc2,
+     main             = "A2: 7-State Markov Chain",
+     vertex.color     = "lightgreen",
+     vertex.label.cex = 1.1,
+     edge.arrow.size  = 0.45,
+     edge.label.cex   = 0.75)
+```
+
+### Part (b): State Classification
+
+```{r a2-part-b}
+cat("Communicating Classes:\n"); print(communicatingClasses(mc2))
+cat("\nRecurrent Classes:\n");     print(recurrentClasses(mc2))
+cat("\nTransient Classes:\n");     print(transientClasses(mc2))
+cat("\nAbsorbing States:\n");      print(absorbingStates(mc2))
+cat("\nOverall chain period:\n");  cat("  period =", period(mc2), "\n")
+```
+
+**Interpretation:**
+* **RECURRENT CLASS:** {S1, S2}
+  * S1 -> S2 (prob 1) and S2 -> S1 (prob 1): they alternate.
+  * This class is CLOSED (once entered, the chain stays here).
+  * Period = 2 (S1 and S2 each have period 2).
+* **TRANSIENT STATES:** {S3, S4, S5, S6, S7}
+  * S3 transitions only into {S4, S5, S6, S7} -- never returns to S3.
+  * S4, S6, S7 stay within {S4-S7} but S5 can escape to S1 (prob 0.3).
+  * Because S5 can reach S1, there is a positive probability of the chain leaving {S3-S7} permanently into {S1, S2}.
+  * Hence S3-S7 are all TRANSIENT.
+* NO absorbing states (no state has P(i,i) = 1).
+* NO reflecting states in the strict sense.
+
+### Part (c): Two Simulated Trajectories
+
+```{r a2-part-c}
+set.seed(42)
+n_steps2 <- 40
+state_num2 <- function(s) as.integer(gsub("S", "", s))
+
+par(mfrow = c(2, 1), mar = c(4, 4, 3, 1))
+for (i in 1:2) {
+  start <- sample(states2, 1)
+  traj  <- c(start, rmarkovchain(n = n_steps2, object = mc2, t0 = start))
+  plot(0:n_steps2, state_num2(traj),
+       type = "b", pch = 19, col = i + 2, lwd = 1.5,
+       xlab = "Step n", ylab = "State", ylim = c(1, 7),
+       main = sprintf("Trajectory %d  |  Start: %s", i, start),
+       yaxt = "n")
+  axis(2, at = 1:7, labels = states2)
+  cat(sprintf("Trajectory %d (start = %s): first 15 steps: %s ...\n",
+              i, start, paste(traj[1:15], collapse = " ")))
+}
+par(mfrow = c(1, 1))
+```
+
+**Comment:**
+* If a trajectory starts in S1 or S2, it simply oscillates between S1 and S2 indefinitely (period-2 behaviour is clearly visible).
+* If a trajectory starts in S3-S7, it wanders through those states for a while. As soon as it hits S5 and jumps to S1, it is absorbed into the {S1, S2} oscillation forever.
+* Transient states S3-S7 are visited only a finite number of times.
+
+### Part (d): Limiting Probabilities
+
+```{r a2-part-d}
+ss2 <- steadyStates(mc2)
+print(round(ss2, 6))
+```
+
+**Interpretation:**
+The chain has a unique steady-state distribution concentrated on the recurrent class {S1, S2}, with pi(S1) = pi(S2) = 0.5 and all other states having limiting probability 0. This reflects the fact that S1 and S2 are visited alternately with equal frequency.
+
+**Is the chain ergodic?**
+**NO.** An ergodic chain requires irreducibility (all states communicate with each other). Here S1 and S2 cannot reach S3-S7, so the chain is reducible. Additionally, {S1, S2} has period 2 (not aperiodic). Hence the chain is NOT ergodic.
+
+*Note: There is no single limiting distribution P^n -> Pi as n -> inf; rather, P^n oscillates between two matrices due to the period-2 class.*
+
+---
+
+## QUESTION A3: Road Traffic Markov Chain
+
+```{r a3-setup}
+states3 <- c("Light", "Heavy", "Jammed")
+
+# 1PM - 4PM transition matrix
+P_day <- matrix(c(
+  0.4, 0.4, 0.2,
+  0.3, 0.4, 0.3,   # Heavy->Heavy = 0.4 
+  0.0, 0.1, 0.9
+), nrow = 3, byrow = TRUE)
+rownames(P_day) <- colnames(P_day) <- states3
+
+# 4PM - 6PM transition matrix
+P_eve <- matrix(c(
+  0.1, 0.5, 0.4,
+  0.1, 0.3, 0.6,
+  0.0, 0.1, 0.9
+), nrow = 3, byrow = TRUE)
+rownames(P_eve) <- colnames(P_eve) <- states3
+
+# Number of 20-minute steps in each period
+# 1PM -> 4PM: 180 min / 20 min = 9 steps
+# 4PM -> 6PM: 120 min / 20 min = 6 steps
+n_day <- 9
+n_eve <- 6
+```
+
+### Part (a): Theoretical Distribution at 6PM
+
+```{r a3-part-a}
+# Compute matrix powers via repeated multiplication
+mat_power <- function(M, k) {
+  result <- diag(nrow(M))   # identity
+  for (i in seq_len(k)) result <- result %*% M
+  result
+}
+
+P_day_9 <- mat_power(P_day, n_day)   # P_day^9
+P_eve_6 <- mat_power(P_eve, n_eve)   # P_eve^6
+
+# Initial state: Light at 1PM -> row vector (1, 0, 0)
+init <- c(1, 0, 0)
+
+dist_4pm <- init      %*% P_day_9
+dist_6pm <- dist_4pm  %*% P_eve_6
+
+cat("Distribution at 4PM (after 9 steps of P_day):\n")
+print(round(dist_4pm, 6))
+cat("\nDistribution at 6PM (after further 6 steps of P_eve):\n")
+print(round(dist_6pm, 6))
+```
+
+**Interpretation:**
+Starting from Light traffic at 1PM, by 6PM the traffic is most likely Jammed (highest probability). This reflects the evening peak hour dynamics captured in the P_eve matrix, where the Jammed state is highly absorbing (P(Jammed->Jammed) = 0.9).
+
+### Part (b): Simulation to verify (10,000 trajectories)
+
+```{r a3-part-b}
+set.seed(2024)
+n_sim       <- 10000
+final_states <- character(n_sim)
+
+sim_one_trajectory <- function() {
+  current <- "Light"
+  # Phase 1: 1PM -> 4PM  (9 steps using P_day)
+  for (s in seq_len(n_day)) {
+    current <- sample(states3, size = 1, prob = P_day[current, ])
+  }
+  # Phase 2: 4PM -> 6PM  (6 steps using P_eve)
+  for (s in seq_len(n_eve)) {
+    current <- sample(states3, size = 1, prob = P_eve[current, ])
+  }
+  current
+}
+
+for (i in seq_len(n_sim)) final_states[i] <- sim_one_trajectory()
+
+# Simulated distribution
+sim_table <- table(factor(final_states, levels = states3))
+sim_dist  <- sim_table / n_sim
+
+# Comparison table
+comparison_df <- data.frame(
+  State       = states3,
+  Theoretical = round(as.numeric(dist_6pm), 4),
+  Simulated   = round(as.numeric(sim_dist),  4),
+  Difference  = round(abs(as.numeric(dist_6pm) - as.numeric(sim_dist)), 4)
+)
+print(comparison_df)
+```
+
+#### Bar Chart Comparison
+
+```{r a3-bar-chart}
+comp_long <- data.frame(
+  State  = rep(states3, 2),
+  Method = c(rep("Theoretical", 3), rep("Simulated", 3)),
+  Prob   = c(as.numeric(dist_6pm), as.numeric(sim_dist))
+)
+
+ggplot(comp_long, aes(x = State, y = Prob, fill = Method)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.6) +
+  scale_fill_manual(values = c("steelblue", "tomato")) +
+  labs(title    = "A3: Theoretical vs Simulated Distribution at 6PM",
+       subtitle = sprintf("n = %d simulations | Starting state: Light at 1PM", n_sim),
+       x        = "Traffic State",
+       y        = "Probability") +
+  theme_minimal(base_size = 13) +
+  theme(plot.title    = element_text(face = "bold"),
+        legend.position = "top")
+```
+
+#### Sample Trajectory Visualisation over Time
+
+```{r a3-sample-traj}
+set.seed(7)
+full_traj <- "Light"
+for (s in seq_len(n_day)) {
+  full_traj <- c(full_traj,
+    sample(states3, 1, prob = P_day[tail(full_traj, 1), ]))
+}
+for (s in seq_len(n_eve)) {
+  full_traj <- c(full_traj,
+    sample(states3, 1, prob = P_eve[tail(full_traj, 1), ]))
+}
+
+times  <- seq(60, 60 + (n_day + n_eve) * 20, by = 20)   # minutes past noon
+labels <- sprintf("%d:%02d", times %/% 60 + 12, times %% 60)
+state_idx <- match(full_traj, states3)
+
+plot(seq_along(full_traj) - 1, state_idx,
+     type = "b", pch = 19, col = "darkorange", lwd = 2,
+     xaxt = "n", yaxt = "n",
+     xlab = "Time", ylab = "Traffic State",
+     main = "A3: Sample Trajectory from 1PM to 6PM")
+axis(1, at = 0:(n_day + n_eve), labels = labels, las = 2, cex.axis = 0.75)
+axis(2, at = 1:3, labels = states3, las = 1)
+abline(v = n_day, lty = 2, col = "grey50")
+text(n_day + 0.2, 3, "4PM\n(matrix change)", adj = 0, cex = 0.8, col = "grey40")
+```
+
+**Conclusion:**
+The simulated proportions closely match the theoretical probabilities (differences are all < 0.01), validating the analytical matrix multiplication result. The law of large numbers ensures convergence as `n_sim -> infinity`. 
+
+**Key result:** By 6PM, traffic is predominantly Jammed, with a small probability of Heavy and very low probability of Light — consistent with real-world evening rush-hour behaviour.
